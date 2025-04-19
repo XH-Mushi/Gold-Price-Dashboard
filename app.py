@@ -109,24 +109,37 @@ with tab2:
     col1, col2, col3 = st.columns(3)
 
     with col1:
+        current_price = float(gold_df['Close'].iloc[-1])
+        previous_price = float(gold_df['Close'].iloc[-2])
+        price_change = ((current_price - previous_price) /
+                        previous_price * 100)
+
         st.metric(
             label="当前黄金价格",
-            value=f"${gold_df['Close'].iloc[-1]:,.2f}",
-            delta=f"{((gold_df['Close'].iloc[-1] - gold_df['Close'].iloc[-2])/gold_df['Close'].iloc[-2]*100):,.2f}%"
+            value=f"${current_price:,.2f}",
+            delta=f"{price_change:,.2f}%"
         )
 
     with col2:
+        avg_30d = float(gold_df['Close'].tail(30).mean())
+        avg_60d = float(gold_df['Close'].tail(60).head(30).mean())
+        avg_change = ((avg_30d - avg_60d) / avg_60d * 100)
+
         st.metric(
             label="30天平均价格",
-            value=f"${gold_df['Close'].tail(30).mean():,.2f}",
-            delta=f"{((gold_df['Close'].tail(30).mean() - gold_df['Close'].tail(60).head(30).mean())/gold_df['Close'].tail(60).head(30).mean()*100):,.2f}%"
+            value=f"${avg_30d:,.2f}",
+            delta=f"{avg_change:,.2f}%"
         )
 
     with col3:
+        high_price = float(gold_df['High'].max())
+        low_price = float(gold_df['Low'].min())
+        range_percent = ((high_price - low_price) / low_price * 100)
+
         st.metric(
             label="年度最高价格",
-            value=f"${gold_df['High'].max():,.2f}",
-            delta=f"{((gold_df['High'].max() - gold_df['Low'].min())/gold_df['Low'].min()*100):,.2f}%"
+            value=f"${high_price:,.2f}",
+            delta=f"{range_percent:,.2f}%"
         )
 
     # 黄金价格趋势图
