@@ -121,95 +121,75 @@ def show_gold_analysis():
                 delta=f"{range_percent:+.2f}%"
             )
 
-        # 黄金价格趋势图 - 使用更简单的方法创建图表
+        # 黄金价格趋势图
         st.subheader("黄金价格走势")
 
-        # 创建一个干净的数据副本用于绘图
-        plot_df = gold_df.copy()
+        # 直接使用 plotly express 创建图表
+        fig_gold = px.line(
+            gold_df,
+            x='Date',
+            y=['Open', 'High', 'Low', 'Close'],
+            title='黄金价格历史走势',
+            labels={'value': '价格 (USD)', 'variable': '价格类型'},
+            color_discrete_map={
+                'Open': '#48AAAD',
+                'High': '#47A025',
+                'Low': '#FF0000',
+                'Close': '#1E3888'
+            }
+        )
 
-        # 确保 'Date' 列是正确的格式
-        if 'Date' in plot_df.columns:
-            # 创建简单的图表，一次只绘制一条线
-            fig = go.Figure()
+        # 优化图表布局
+        fig_gold.update_layout(
+            legend_title='价格类型',
+            xaxis_title='日期',
+            yaxis_title='价格 (USD)',
+            height=500
+        )
 
-            # 分别添加每条线，以避免DataFrame的布尔值判断问题
-            if 'Open' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['Open'], mode='lines', name='Open'))
-
-            if 'Close' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['Close'], mode='lines', name='Close'))
-
-            if 'High' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['High'], mode='lines', name='High'))
-
-            if 'Low' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['Low'], mode='lines', name='Low'))
-
-            fig.update_layout(
-                title='黄金价格历史走势',
-                xaxis_title='日期',
-                yaxis_title='价格 (USD)',
-                legend_title='价格类型'
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.error("数据中缺少'Date'列，无法创建趋势图")
+        # 显示图表
+        st.plotly_chart(fig_gold, use_container_width=True)
 
         # 成交量分析
         col_left, col_right = st.columns(2)
 
         with col_left:
             st.subheader("每日成交量")
-            if 'Date' in plot_df.columns and 'Volume' in plot_df.columns:
-                volume_fig = go.Figure()
-                volume_fig.add_trace(
-                    go.Bar(x=plot_df['Date'], y=plot_df['Volume']))
-                volume_fig.update_layout(title='黄金交易成交量')
-                st.plotly_chart(volume_fig, use_container_width=True)
-            else:
-                st.error("数据中缺少必要的列，无法创建成交量图表")
+            # 直接使用 plotly express 创建柱状图
+            fig_volume = px.bar(
+                gold_df,
+                x='Date',
+                y='Volume',
+                title='黄金交易成交量',
+                color_discrete_sequence=['#3A4750']
+            )
+            st.plotly_chart(fig_volume, use_container_width=True)
 
         with col_right:
             st.subheader("价格波动性")
+            # 计算波动幅度
             try:
-                # 创建一个临时列用于波动幅度，使用更安全的方法
-                plot_df['波动幅度'] = 0.0
+                # 使用向量化操作计算波动幅度
+                mask = gold_df['Low'] > 0  # 创建条件掩码
+                gold_df['波动幅度'] = pd.Series(0.0, index=gold_df.index)  # 初始化为0
 
-                # 遍历处理每一行
-                for i in range(len(plot_df)):
-                    low_value = plot_df['Low'].iloc[i]
-                    high_value = plot_df['High'].iloc[i]
+                # 只对 Low > 0 的行应用计算
+                gold_df.loc[mask, '波动幅度'] = (
+                    (gold_df.loc[mask, 'High'] - gold_df.loc[mask, 'Low']) /
+                    gold_df.loc[mask, 'Low'] * 100
+                )
 
-                    # 确保处理的是标量值
-                    if isinstance(low_value, pd.Series):
-                        low_value = low_value.iloc[0]
-                    if isinstance(high_value, pd.Series):
-                        high_value = high_value.iloc[0]
-
-                    if low_value > 0:
-                        volatility = (high_value - low_value) / low_value * 100
-                        plot_df.at[plot_df.index[i], '波动幅度'] = volatility
-
-                # 使用更简单的方式创建图表
-                if 'Date' in plot_df.columns:
-                    volatility_fig = go.Figure()
-                    volatility_fig.add_trace(go.Scatter(
-                        x=plot_df['Date'],
-                        y=plot_df['波动幅度'],
-                        mode='lines'
-                    ))
-                    volatility_fig.update_layout(title='日内价格波动幅度 (%)')
-                    st.plotly_chart(volatility_fig, use_container_width=True)
-                else:
-                    st.error("数据中缺少'Date'列，无法创建波动性图表")
+                # 创建波动幅度图表
+                fig_volatility = px.line(
+                    gold_df,
+                    x='Date',
+                    y='波动幅度',
+                    title='日内价格波动幅度 (%)',
+                    color_discrete_sequence=['#FF9500']
+                )
+                st.plotly_chart(fig_volatility, use_container_width=True)
             except Exception as e:
                 st.error(f"创建波动性图表时出错: {str(e)}")
-                st.exception(e)
 
         # 显示原始数据
         st.subheader("黄金价格原始数据")
