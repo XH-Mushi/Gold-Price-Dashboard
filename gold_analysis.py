@@ -6,10 +6,12 @@ from datetime import datetime
 import numpy as np
 import matplotlib
 from matplotlib.font_manager import FontProperties
+import matplotlib.dates as mdates
 
-# 设置中文字体支持
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 用来正常显示中文标签
-plt.rcParams['axes.unicode_minus'] = False    # 用来正常显示负号
+# 设置适用于 Windows 的多种中文字体备选
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei',
+                                   'SimSun', 'Arial Unicode MS', 'sans-serif']
+plt.rcParams['axes.unicode_minus'] = False
 
 
 @st.cache_data
@@ -126,34 +128,32 @@ def show_gold_analysis():
                 delta=f"{range_percent:+.2f}%"
             )
 
-        # 黄金价格趋势图 - 使用 matplotlib 创建简单可靠的图表
-        st.subheader("黄金价格走势")
+        # 黄金价格趋势图
+        st.subheader("黄金价格历史走势")
 
-        # 创建一个干净的数据副本用于绘图
-        plot_df = gold_df.copy()
-
-        # 确保日期是datetime类型
-        if 'Date' in plot_df.columns:
-            if not pd.api.types.is_datetime64_dtype(plot_df['Date']):
-                plot_df['Date'] = pd.to_datetime(plot_df['Date'])
-
-        # 创建黄金价格图表
+        # 创建黄金价格图表 (使用英文标签避免字体问题)
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(plot_df['Date'].values, plot_df['Open'].values,
-                label='开盘价', linewidth=1)
-        ax.plot(plot_df['Date'].values,
-                plot_df['Close'].values, label='收盘价', linewidth=2)
-        ax.plot(plot_df['Date'].values, plot_df['High'].values,
-                label='最高价', linewidth=1, linestyle='--')
-        ax.plot(plot_df['Date'].values, plot_df['Low'].values,
-                label='最低价', linewidth=1, linestyle='--')
+        ax.plot(gold_df['Date'].values, gold_df['Open'].values,
+                label='Open Price', linewidth=1)
+        ax.plot(gold_df['Date'].values, gold_df['Close'].values,
+                label='Close Price', linewidth=2)
+        ax.plot(gold_df['Date'].values, gold_df['High'].values,
+                label='High Price', linewidth=1, linestyle='--')
+        ax.plot(gold_df['Date'].values, gold_df['Low'].values,
+                label='Low Price', linewidth=1, linestyle='--')
 
         # 设置图表样式
-        ax.set_title('黄金价格历史走势', fontsize=16)
-        ax.set_xlabel('日期', fontsize=12)
-        ax.set_ylabel('价格 (USD)', fontsize=12)
+        ax.set_title('Gold Price History', fontsize=16)
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Price (USD)', fontsize=12)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=10)
+
+        # 调整日期格式
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        ax.xaxis.set_major_locator(
+            mdates.MonthLocator(interval=3))  # 每3个月显示一个刻度
+        plt.xticks(rotation=45)
 
         # 调整布局
         plt.tight_layout()
@@ -167,26 +167,31 @@ def show_gold_analysis():
         with col_left:
             st.subheader("每日成交量")
 
-            # 创建成交量图表，使用条形图
+            # 创建成交量图表，使用更简单的方式绘制柱状图
             fig2, ax2 = plt.subplots(figsize=(8, 4))
 
-            # 提取数据并确保是简单数组
-            dates = plot_df['Date'].values
-            volumes = plot_df['Volume'].values
+            # 对数据进行采样，减少数据点数量
+            sample_size = max(1, len(gold_df) // 30)  # 减少采样数量
 
-            # 每隔几个数据点绘制一个条形，以避免过于密集
-            sample_size = max(1, len(dates) // 50)  # 最多显示约50个条
-            sampled_dates = dates[::sample_size]
-            sampled_volumes = volumes[::sample_size]
+            # 使用简单的索引位置作为x轴，而不是日期
+            indices = np.arange(len(gold_df))[::sample_size]
+            volumes = gold_df['Volume'].values[::sample_size]
 
-            # 绘制条形图
-            ax2.bar(sampled_dates, sampled_volumes,
-                    width=5, color='steelblue', alpha=0.7)
+            # 绘制柱状图
+            ax2.bar(indices, volumes, width=1, color='steelblue', alpha=0.7)
+
+            # 设置x轴刻度为对应的日期
+            sample_dates = gold_df['Date'].iloc[::sample_size]
+            date_labels = [d.strftime('%Y-%m') for d in sample_dates]
+
+            # 设置x轴刻度位置和标签
+            ax2.set_xticks(indices[::5])  # 每5个点显示一个标签
+            ax2.set_xticklabels(date_labels[::5], rotation=45)
 
             # 设置图表样式
-            ax2.set_title('黄金交易成交量', fontsize=14)
-            ax2.set_xlabel('日期', fontsize=10)
-            ax2.set_ylabel('成交量', fontsize=10)
+            ax2.set_title('Gold Trading Volume', fontsize=14)
+            ax2.set_xlabel('Date', fontsize=10)
+            ax2.set_ylabel('Volume', fontsize=10)
             ax2.grid(True, alpha=0.3)
 
             # 调整布局
@@ -199,25 +204,30 @@ def show_gold_analysis():
             st.subheader("价格波动性")
             try:
                 # 使用向量化操作计算波动幅度
-                mask = plot_df['Low'] > 0  # 创建条件掩码
-                plot_df['波动幅度'] = pd.Series(0.0, index=plot_df.index)  # 初始化为0
+                gold_df['Volatility'] = 0.0  # 使用英文列名
 
-                # 只对 Low > 0 的行应用计算
-                plot_df.loc[mask, '波动幅度'] = ((plot_df.loc[mask, 'High'] - plot_df.loc[mask, 'Low']) /
-                                             plot_df.loc[mask, 'Low'] * 100)
+                # 安全计算波动幅度
+                mask = gold_df['Low'] > 0
+                gold_df.loc[mask, 'Volatility'] = ((gold_df.loc[mask, 'High'] - gold_df.loc[mask, 'Low']) /
+                                                   gold_df.loc[mask, 'Low'] * 100)
 
                 # 创建波动幅度图表
                 fig3, ax3 = plt.subplots(figsize=(8, 4))
 
                 # 绘制折线图
                 ax3.plot(
-                    plot_df['Date'].values, plot_df['波动幅度'].values, color='orange', linewidth=1.5)
+                    gold_df['Date'].values, gold_df['Volatility'].values, color='orange', linewidth=1.5)
 
                 # 设置图表样式
-                ax3.set_title('日内价格波动幅度 (%)', fontsize=14)
-                ax3.set_xlabel('日期', fontsize=10)
-                ax3.set_ylabel('波动幅度 (%)', fontsize=10)
+                ax3.set_title('Daily Price Volatility (%)', fontsize=14)
+                ax3.set_xlabel('Date', fontsize=10)
+                ax3.set_ylabel('Volatility (%)', fontsize=10)
                 ax3.grid(True, alpha=0.3)
+
+                # 调整日期格式
+                ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+                ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+                plt.xticks(rotation=45)
 
                 # 调整布局
                 plt.tight_layout()
