@@ -48,18 +48,19 @@ def show_gold_analysis():
                 # Calculate price change percentage
                 price_change_pct = 0
                 try:
-                    current_price = last_row['Close']
-                    prev_price = prev_row['Close']
+                    # Convert to scalar values
+                    current_price = float(last_row['Close'])
+                    prev_price = float(prev_row['Close'])
                     price_change_pct = (
                         current_price - prev_price) / prev_price * 100 if prev_price != 0 else 0
-                except:
-                    pass
+                except Exception as e:
+                    st.warning(f"Could not calculate price change: {str(e)}")
 
                 # Display metrics
                 st.subheader("Current Gold Price")
                 st.metric(
                     label="Price (USD)",
-                    value=f"${last_row['Close']:,.2f}",
+                    value=f"${current_price:,.2f}",
                     delta=f"{price_change_pct:+.2f}%"
                 )
 
@@ -77,8 +78,10 @@ def show_gold_analysis():
             st.dataframe(recent_data, use_container_width=True)
 
             # Add info about the entire dataset
+            min_date = gold_df['Date'].min().strftime('%Y-%m-%d')
+            max_date = gold_df['Date'].max().strftime('%Y-%m-%d')
             st.info(
-                f"Total data points: {len(gold_df)} from {gold_df['Date'].min().strftime('%Y-%m-%d')} to {gold_df['Date'].max().strftime('%Y-%m-%d')}")
+                f"Total data points: {len(gold_df)} from {min_date} to {max_date}")
 
             # Allow viewing the full dataset
             with st.expander("View all gold price data"):
