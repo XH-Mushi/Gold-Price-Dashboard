@@ -121,7 +121,7 @@ def show_gold_analysis():
                 delta=f"{range_percent:+.2f}%"
             )
 
-        # 黄金价格趋势图 - 使用更简单的方法创建图表
+        # 黄金价格趋势图 - 使用更美观的配置
         st.subheader("黄金价格走势")
 
         # 创建一个干净的数据副本用于绘图
@@ -129,47 +129,144 @@ def show_gold_analysis():
 
         # 确保 'Date' 列是正确的格式
         if 'Date' in plot_df.columns:
-            # 创建简单的图表，一次只绘制一条线
+            # 创建更美观的图表
             fig = go.Figure()
 
-            # 分别添加每条线，以避免DataFrame的布尔值判断问题
-            if 'Open' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['Open'], mode='lines', name='Open'))
+            # 分别添加每条线，使用更好的颜色和样式
+            fig.add_trace(go.Scatter(
+                x=plot_df['Date'],
+                y=plot_df['Open'],
+                mode='lines',
+                name='开盘价',
+                line=dict(color='#48AAAD', width=1.5)
+            ))
 
-            if 'Close' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['Close'], mode='lines', name='Close'))
+            fig.add_trace(go.Scatter(
+                x=plot_df['Date'],
+                y=plot_df['Close'],
+                mode='lines',
+                name='收盘价',
+                line=dict(color='#1E3888', width=2)
+            ))
 
-            if 'High' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['High'], mode='lines', name='High'))
+            fig.add_trace(go.Scatter(
+                x=plot_df['Date'],
+                y=plot_df['High'],
+                mode='lines',
+                name='最高价',
+                line=dict(color='#47A025', width=1.5, dash='dot')
+            ))
 
-            if 'Low' in plot_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=plot_df['Date'], y=plot_df['Low'], mode='lines', name='Low'))
+            fig.add_trace(go.Scatter(
+                x=plot_df['Date'],
+                y=plot_df['Low'],
+                mode='lines',
+                name='最低价',
+                line=dict(color='#FF0000', width=1.5, dash='dot')
+            ))
 
+            # 添加移动平均线
+            if len(plot_df) >= 30:
+                ma30 = plot_df['Close'].rolling(window=30).mean()
+                fig.add_trace(go.Scatter(
+                    x=plot_df['Date'],
+                    y=ma30,
+                    mode='lines',
+                    name='30日均线',
+                    line=dict(color='#9C179E', width=2.5, dash='dashdot')
+                ))
+
+            # 优化布局
             fig.update_layout(
-                title='黄金价格历史走势',
+                title={
+                    'text': '黄金价格历史走势',
+                    'font': {'size': 24, 'color': '#1f77b4'},
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top'
+                },
                 xaxis_title='日期',
                 yaxis_title='价格 (USD)',
-                legend_title='价格类型'
+                legend_title='价格类型',
+                hovermode='x unified',
+                plot_bgcolor='rgba(240,240,240,0.2)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white'),
+                xaxis=dict(
+                    showgrid=True,
+                    gridcolor='rgba(150,150,150,0.2)',
+                    tickformat='%Y-%m-%d'
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor='rgba(150,150,150,0.2)',
+                    tickprefix='$',
+                    tickformat=',.2f'
+                ),
+                autosize=True,
+                height=500,
+                margin=dict(l=40, r=40, t=60, b=40)
+            )
+
+            # 设置悬停信息格式
+            fig.update_traces(
+                hovertemplate='%{y:$,.2f}<extra></extra>'
             )
 
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.error("数据中缺少'Date'列，无法创建趋势图")
 
-        # 成交量分析
+        # 成交量分析和价格波动性
         col_left, col_right = st.columns(2)
 
         with col_left:
             st.subheader("每日成交量")
             if 'Date' in plot_df.columns and 'Volume' in plot_df.columns:
+                # 计算成交量移动平均线
+                plot_df['Volume_MA10'] = plot_df['Volume'].rolling(
+                    window=10).mean()
+
                 volume_fig = go.Figure()
-                volume_fig.add_trace(
-                    go.Bar(x=plot_df['Date'], y=plot_df['Volume']))
-                volume_fig.update_layout(title='黄金交易成交量')
+                # 添加成交量柱状图
+                volume_fig.add_trace(go.Bar(
+                    x=plot_df['Date'],
+                    y=plot_df['Volume'],
+                    name='成交量',
+                    marker_color='rgba(58, 71, 80, 0.6)'
+                ))
+
+                # 添加10日移动平均线
+                if len(plot_df) >= 10:
+                    volume_fig.add_trace(go.Scatter(
+                        x=plot_df['Date'],
+                        y=plot_df['Volume_MA10'],
+                        name='10日均线',
+                        line=dict(color='red', width=2)
+                    ))
+
+                # 优化布局
+                volume_fig.update_layout(
+                    title='黄金交易成交量',
+                    xaxis_title='日期',
+                    yaxis_title='成交量',
+                    plot_bgcolor='rgba(240,240,240,0.2)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white'),
+                    xaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(150,150,150,0.2)'
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(150,150,150,0.2)'
+                    ),
+                    height=350,
+                    legend=dict(orientation="h", yanchor="bottom",
+                                y=1.02, xanchor="right", x=1),
+                    margin=dict(l=40, r=40, t=60, b=40)
+                )
                 st.plotly_chart(volume_fig, use_container_width=True)
             else:
                 st.error("数据中缺少必要的列，无法创建成交量图表")
@@ -177,17 +274,16 @@ def show_gold_analysis():
         with col_right:
             st.subheader("价格波动性")
             try:
-                # 创建一个临时列用于波动幅度，使用更安全的方法
+                # 安全地计算波动幅度
                 plot_df['波动幅度'] = 0.0
 
-                # 遍历处理每一行
+                # 计算每日波动幅度百分比
                 for i in range(len(plot_df)):
                     low_value = plot_df['Low'].iloc[i]
-                    high_value = plot_df['High'].iloc[i]
-
-                    # 确保处理的是标量值
                     if isinstance(low_value, pd.Series):
                         low_value = low_value.iloc[0]
+
+                    high_value = plot_df['High'].iloc[i]
                     if isinstance(high_value, pd.Series):
                         high_value = high_value.iloc[0]
 
@@ -195,25 +291,81 @@ def show_gold_analysis():
                         volatility = (high_value - low_value) / low_value * 100
                         plot_df.at[plot_df.index[i], '波动幅度'] = volatility
 
-                # 使用更简单的方式创建图表
-                if 'Date' in plot_df.columns:
-                    volatility_fig = go.Figure()
+                # 计算移动平均波动幅度
+                if len(plot_df) >= 14:
+                    plot_df['波动幅度_MA14'] = plot_df['波动幅度'].rolling(
+                        window=14).mean()
+
+                # 创建波动幅度图表
+                volatility_fig = go.Figure()
+
+                # 添加波动幅度线
+                volatility_fig.add_trace(go.Scatter(
+                    x=plot_df['Date'],
+                    y=plot_df['波动幅度'],
+                    mode='lines',
+                    name='日内波动',
+                    line=dict(color='#FF9500', width=1.5)
+                ))
+
+                # 添加移动平均线
+                if len(plot_df) >= 14 and '波动幅度_MA14' in plot_df.columns:
                     volatility_fig.add_trace(go.Scatter(
                         x=plot_df['Date'],
-                        y=plot_df['波动幅度'],
-                        mode='lines'
+                        y=plot_df['波动幅度_MA14'],
+                        mode='lines',
+                        name='14日均线',
+                        line=dict(color='#5D69B1', width=2.5, dash='dash')
                     ))
-                    volatility_fig.update_layout(title='日内价格波动幅度 (%)')
-                    st.plotly_chart(volatility_fig, use_container_width=True)
-                else:
-                    st.error("数据中缺少'Date'列，无法创建波动性图表")
+
+                # 优化布局
+                volatility_fig.update_layout(
+                    title='日内价格波动幅度 (%)',
+                    xaxis_title='日期',
+                    yaxis_title='波动幅度 (%)',
+                    plot_bgcolor='rgba(240,240,240,0.2)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white'),
+                    xaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(150,150,150,0.2)'
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(150,150,150,0.2)',
+                        ticksuffix='%'
+                    ),
+                    height=350,
+                    legend=dict(orientation="h", yanchor="bottom",
+                                y=1.02, xanchor="right", x=1),
+                    margin=dict(l=40, r=40, t=60, b=40)
+                )
+
+                st.plotly_chart(volatility_fig, use_container_width=True)
             except Exception as e:
                 st.error(f"创建波动性图表时出错: {str(e)}")
                 st.exception(e)
 
-        # 显示原始数据
-        st.subheader("黄金价格原始数据")
-        st.dataframe(gold_df, use_container_width=True)
+        # 显示原始数据，但使用更好的格式
+        with st.expander("点击查看黄金价格原始数据"):
+            # 显示最近30天的数据，与更好的格式
+            st.write("最近30天黄金价格数据:")
+            display_df = gold_df.tail(30).copy()
+
+            # 格式化显示的列
+            for col in ['Open', 'High', 'Low', 'Close']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(
+                        lambda x: f"${x:,.2f}")
+
+            if 'Volume' in display_df.columns:
+                display_df['Volume'] = display_df['Volume'].apply(
+                    lambda x: f"{x:,}")
+
+            if 'Date' in display_df.columns:
+                display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
+
+            st.dataframe(display_df, use_container_width=True)
 
     except Exception as e:
         # 打印更详细的错误信息
