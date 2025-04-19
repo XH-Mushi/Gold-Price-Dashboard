@@ -117,10 +117,11 @@ else:
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                current_price = gold_df['Close'].iloc[-1]
-                previous_price = gold_df['Close'].iloc[-2]
-                price_change = ((current_price - previous_price) /
-                                previous_price * 100)
+                # 确保转换为浮点数
+                current_price = float(gold_df['Close'].iloc[-1])
+                previous_price = float(gold_df['Close'].iloc[-2])
+                price_change = (
+                    (current_price - previous_price) / previous_price * 100)
 
                 st.metric(
                     label="当前黄金价格",
@@ -129,8 +130,9 @@ else:
                 )
 
             with col2:
-                avg_30d = gold_df['Close'].tail(30).mean()
-                avg_60d = gold_df['Close'].tail(60).head(30).mean()
+                # 确保转换为浮点数
+                avg_30d = float(gold_df['Close'].tail(30).mean())
+                avg_60d = float(gold_df['Close'].tail(60).head(30).mean())
                 avg_change = ((avg_30d - avg_60d) / avg_60d * 100)
 
                 st.metric(
@@ -140,8 +142,9 @@ else:
                 )
 
             with col3:
-                high_price = gold_df['High'].max()
-                low_price = gold_df['Low'].min()
+                # 确保转换为浮点数
+                high_price = float(gold_df['High'].max())
+                low_price = float(gold_df['Low'].min())
                 range_percent = ((high_price - low_price) / low_price * 100)
 
                 st.metric(
