@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+from gold_chart import show_gold_chart
 
 
 @st.cache_data
@@ -63,6 +64,9 @@ def show_gold_analysis():
                     value=f"${current_price:,.2f}",
                     delta=f"{price_change_pct:+.2f}%"
                 )
+
+            # Show gold price chart
+            show_gold_chart(gold_df)
 
             # Show latest data in a table
             st.subheader("Recent Gold Prices")
