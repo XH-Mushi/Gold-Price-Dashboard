@@ -2,243 +2,313 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
-from gold_chart import show_gold_chart
+import plotly.graph_objects as go
+from database import init_db, save_gold_price, get_latest_gold_price, get_price_history
 import time
+import random
+
+# 初始化数据库
+init_db()
+
+# MetalpriceAPI配置
+METAL_PRICE_API_KEY = "YOUR_API_KEY"  # 需要替换为您的API密钥
+METAL_PRICE_API_BASE_URL = "https://api.metalpriceapi.com/v1"
 
 
-@st.cache_data
+def safe_download(symbol, retries=3, delay=2):
+    """安全地下载数据，包含重试和延时"""
+    for attempt in range(retries):
+        try:
+            # 随机延时避免被检测为爬虫
+            time.sleep(delay + random.uniform(1, 3))
+
+            # 设置请求头，模拟浏览器行为
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+
+            # 使用download函数获取数据
+            data = yf.download(
+                symbol,
+                start=(datetime.now() - timedelta(days=5)
+                       ).strftime('%Y-%m-%d'),
+                end=datetime.now().strftime('%Y-%m-%d'),
+                progress=False,
+                ignore_tz=True,
+                timeout=30
+            )
+
+            if not data.empty:
+                return data
+
+        except Exception as e:
+            if attempt < retries - 1:  # 如果还有重试次数
+                st.warning(f"第{attempt + 1}次尝试失败: {str(e)}，等待后重试...")
+                time.sleep(delay * (attempt + 2))  # 递增延时
+            else:
+                st.error(f"下载失败: {str(e)}")
+    return pd.DataFrame()  # 返回空DataFrame表示失败
+
+
+@st.cache_data(ttl=24*3600)  # 缓存24小时
 def get_gold_data():
+    """获取黄金价格数据"""
     try:
-        # Download gold price data
-        gold = yf.download('GC=F', start='2023-01-01',
-                           end=datetime.now().strftime('%Y-%m-%d'))
+        # 首先尝试从数据库获取最新数据
+        latest_data = get_latest_gold_price()
+        if not latest_data.empty:
+            latest_date = pd.to_datetime(latest_data['date'].iloc[0])
+            if latest_date.date() == datetime.now().date():
+                st.success("使用今日缓存的黄金价格数据")
+                return latest_data['international_price_usd'].iloc[0], None
 
-        if gold is None or gold.empty:
-            st.warning("无法获取黄金价格数据")
-            return None
+        # 尝试从Yahoo Finance获取数据
+        st.info("正在从Yahoo Finance获取黄金价格数据...")
 
-        # Reset index to make Date a column
-        gold.reset_index(inplace=True)
-        return gold
-    except Exception as e:
-        st.error(f"获取黄金价格数据时出错: {str(e)}")
-        return None
+        # 优先尝试黄金期货和现货
+        primary_symbols = [
+            "GC=F",     # 黄金期货
+            "XAUUSD=X"  # 黄金现货
+        ]
 
+        # 备用的ETF数据源
+        backup_symbols = [
+            ("GLD", 10),    # SPDR黄金ETF (1/10盎司)
+            ("IAU", 100),   # iShares黄金ETF (1/100盎司)
+            ("SGOL", 10),   # Aberdeen Standard Physical Gold Shares ETF (1/10盎司)
+            ("GLDM", 50),   # SPDR Gold MiniShares Trust (1/50盎司)
+            ("BAR", 50),    # GraniteShares Gold Trust (1/50盎司)
+            ("AAAU", 10),   # Goldman Sachs Physical Gold ETF (1/10盎司)
+        ]
 
-@st.cache_data
-def get_usd_cny_rate():
-    """
-    获取美元兑人民币汇率
-    """
-    try:
-        # 获取美元兑人民币汇率数据
-        usd_cny = yf.download('CNY=X', period='1d')
+        # 首先尝试主要数据源
+        for symbol in primary_symbols:
+            st.info(f"尝试从{symbol}获取数据...")
+            data = safe_download(symbol)
 
-        if usd_cny is None or usd_cny.empty:
-            st.warning("无法获取美元兑人民币汇率")
-            return 7.1  # 返回一个近似值作为备用
+            if not data.empty:
+                try:
+                    current_price = float(
+                        data['Close'].iloc[-1].item())  # 使用.item()避免警告
+                    st.success(f"成功从{symbol}获取黄金价格数据: ${current_price:.2f}/盎司")
+                    return current_price, data
+                except Exception as e:
+                    st.warning(f"数据格式错误: {str(e)}")
+                    continue
 
-        # 获取最新汇率
-        rate = usd_cny['Close'].iloc[-1]
-        if isinstance(rate, pd.Series):
-            rate = rate.iloc[0]
+        # 如果主要数据源都失败，尝试ETF
+        for symbol, multiplier in backup_symbols:
+            st.info(f"尝试从{symbol}获取数据...")
+            data = safe_download(symbol)
 
-        return rate
-    except Exception as e:
-        st.warning(f"获取汇率数据时出错: {str(e)}")
-        return 7.1  # 返回一个近似值作为备用
+            if not data.empty:
+                try:
+                    current_price = float(
+                        data['Close'].iloc[-1].item()) * multiplier  # 使用.item()避免警告
+                    st.success(f"成功从{symbol}获取黄金价格数据: ${current_price:.2f}/盎司")
+                    return current_price, data
+                except Exception as e:
+                    st.warning(f"数据格式错误: {str(e)}")
+                    continue
 
-
-@st.cache_data(ttl=3600)  # 缓存1小时
-def get_china_gold_price():
-    """
-    获取中国国内金价(上海黄金交易所AU9999)
-    返回：价格(人民币/克)，日期
-    """
-    try:
-        # 尝试获取上海黄金交易所AU9999价格
-        # 由于无法直接通过API获取，我们基于国际金价进行估算
-        # 以下代码提供一个基于国际金价的估算值和溢价
-
-        # 获取国际金价（美元/盎司）
-        gold_international = yf.download('GC=F', period='1d')
-
-        if gold_international is None or gold_international.empty:
-            return None, None
-
-        # 获取美元/人民币汇率
-        usd_cny_rate = get_usd_cny_rate()
-
-        # 获取最新国际金价
-        gold_price_usd_oz = gold_international['Close'].iloc[-1]
-        if isinstance(gold_price_usd_oz, pd.Series):
-            gold_price_usd_oz = gold_price_usd_oz.iloc[0]
-
-        # 单位转换：美元/盎司 -> 人民币/克
-        # 1盎司 = 31.1035克
-        gold_price_cny_g = gold_price_usd_oz * usd_cny_rate / 31.1035
-
-        # 中国国内金价通常有1-5%的溢价
-        premium_rate = np.random.uniform(1.01, 1.05)  # 模拟1-5%的溢价
-        china_gold_price = gold_price_cny_g * premium_rate
-
-        # 获取当前日期
-        current_date = datetime.now().strftime('%Y-%m-%d')
-
-        return round(china_gold_price, 2), current_date
+        st.error("所有数据源都获取失败")
+        return None, None
 
     except Exception as e:
-        st.warning(f"获取中国金价数据时出错: {str(e)}")
+        st.error(f"获取黄金数据时出错: {str(e)}")
+        st.info("可能的原因：\n1. API暂时不可用\n2. 网络连接问题\n3. 数据格式发生变化")
         return None, None
 
 
-def show_gold_analysis():
-    # Get the gold data
-    gold_df = get_gold_data()
-
-    # 获取美元兑人民币汇率
-    usd_cny_rate = get_usd_cny_rate()
-
-    # 获取中国国内金价
-    china_gold_price, china_gold_date = get_china_gold_price()
-
-    # Check if data is valid
-    if gold_df is None:
-        st.error("无法获取黄金价格数据。请检查您的网络连接或稍后再试。")
-        return
-
-    # Display header
-    st.header("🌍 全球黄金价格分析")
-
+@st.cache_data(ttl=24*3600)  # 缓存24小时
+def get_usd_cny_rate():
+    """获取美元兑人民币汇率"""
     try:
-        # Show most recent close price as current price
-        if len(gold_df) > 0:
-            # Get the last row
-            last_row = gold_df.iloc[-1]
+        st.info("正在获取美元兑人民币汇率...")
 
-            if len(gold_df) > 1:
-                # Get previous row
-                prev_row = gold_df.iloc[-2]
+        # 尝试不同的汇率数据源
+        exchange_symbols = [
+            "CNY=X",     # 美元/人民币
+            "USDCNY=X",  # 美元/人民币 (替代)
+            "CNH=F"      # 离岸人民币期货
+        ]
 
-                # Calculate price change percentage
-                price_change_pct = 0
+        for symbol in exchange_symbols:
+            st.info(f"尝试从{symbol}获取汇率...")
+            data = safe_download(symbol)
+
+            if not data.empty:
                 try:
-                    # 安全获取标量值，使用.iloc[0]代替float()
-                    current_price = last_row['Close'].iloc[0] if isinstance(
-                        last_row['Close'], pd.Series) else last_row['Close']
-                    prev_price = prev_row['Close'].iloc[0] if isinstance(
-                        prev_row['Close'], pd.Series) else prev_row['Close']
-                    price_change_pct = (
-                        current_price - prev_price) / prev_price * 100 if prev_price != 0 else 0
+                    # 使用.item()避免警告
+                    rate = float(data['Close'].iloc[-1].item())
+                    if symbol == "CNH=F":
+                        rate = 1 / rate  # 转换为直接汇率
+                    st.success(f"成功从{symbol}获取汇率数据: {rate:.4f}")
+                    return rate
                 except Exception as e:
-                    st.warning(f"无法计算价格变化: {str(e)}")
-                    current_price = last_row['Close']  # 直接使用，不转换
+                    st.warning(f"数据格式错误: {str(e)}")
+                    continue
 
-                # 计算人民币金价
-                cny_price = current_price * usd_cny_rate
-
-                # Display metrics
-                st.subheader("当前黄金价格")
-
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    st.metric(
-                        label="国际金价 (美元/盎司)",
-                        value=f"${current_price:,.2f}",
-                        delta=f"{price_change_pct:+.2f}%"
-                    )
-
-                with col2:
-                    st.metric(
-                        label="国际金价 (人民币/盎司)",
-                        value=f"¥{cny_price:,.2f}",
-                        delta=f"{price_change_pct:+.2f}%"
-                    )
-
-                with col3:
-                    if china_gold_price:
-                        # 将国际金价转换为每克价格以便比较
-                        intl_gold_per_gram = cny_price / 31.1035
-                        # 计算溢价百分比
-                        premium_pct = (
-                            (china_gold_price - intl_gold_per_gram) / intl_gold_per_gram) * 100
-
-                        st.metric(
-                            label="中国金价 (人民币/克)",
-                            value=f"¥{china_gold_price:,.2f}",
-                            delta=f"溢价 {premium_pct:+.2f}%"
-                        )
-
-                # 显示单位换算和汇率信息
-                st.caption(
-                    f"当前汇率: 1美元 = {usd_cny_rate:.4f}人民币 | 1盎司 = 31.1035克 (数据来源: Yahoo Finance)")
-                st.caption("说明: 中国金价为估算值，基于上海黄金交易所Au99.99价格水平，可能与实际零售金价有差异")
-
-            # Show gold price chart
-            show_gold_chart(gold_df)
-
-            # Show latest data in a table (更紧凑的设计)
-            st.subheader("最近黄金价格数据")
-
-            # Only include important columns and limit to 5 rows
-            display_cols = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-            recent_data = gold_df.tail(5)[display_cols].copy()
-
-            # Convert dates to string to avoid display issues
-            recent_data['Date'] = recent_data['Date'].dt.strftime('%Y-%m-%d')
-
-            # 添加人民币价格列和每克价格
-            recent_data['Close_CNY'] = recent_data['Close'] * usd_cny_rate
-            recent_data['CNY_Per_Gram'] = recent_data['Close_CNY'] / 31.1035
-
-            # 为表格添加中文列名
-            column_names = {
-                'Date': '日期',
-                'Open': '开盘价 ($/盎司)',
-                'High': '最高价 ($/盎司)',
-                'Low': '最低价 ($/盎司)',
-                'Close': '收盘价 ($/盎司)',
-                'Close_CNY': '收盘价 (￥/盎司)',
-                'CNY_Per_Gram': '人民币/克',
-                'Volume': '成交量'
-            }
-            recent_data = recent_data.rename(columns=column_names)
-
-            # Show the data
-            st.dataframe(recent_data, use_container_width=True, height=220)
-
-            # Add info about the entire dataset in an expander
-            with st.expander("更多信息"):
-                # 安全获取日期
-                min_date = gold_df['Date'].min()
-                max_date = gold_df['Date'].max()
-                min_date_str = min_date.strftime(
-                    '%Y-%m-%d') if hasattr(min_date, 'strftime') else str(min_date)
-                max_date_str = max_date.strftime(
-                    '%Y-%m-%d') if hasattr(max_date, 'strftime') else str(max_date)
-
-                st.info(
-                    f"总数据点: {len(gold_df)} 从 {min_date_str} 到 {max_date_str}")
-
-                # Allow viewing more data
-                st.write("查看更多数据:")
-                num_rows = st.slider(
-                    "显示行数", min_value=10, max_value=100, value=20, step=10)
-
-                # Clone data and format date
-                full_data = gold_df.head(num_rows)[display_cols].copy()
-                full_data['Date'] = full_data['Date'].dt.strftime('%Y-%m-%d')
-                full_data['Close_CNY'] = full_data['Close'] * usd_cny_rate
-                full_data['CNY_Per_Gram'] = full_data['Close_CNY'] / 31.1035
-
-                # 中文列名
-                full_data = full_data.rename(columns=column_names)
-
-                st.dataframe(full_data, use_container_width=True)
+        # 如果所有API都失败，使用备用值
+        st.warning("无法获取实时汇率，使用默认汇率7.2")
+        return 7.2
 
     except Exception as e:
-        st.error(f"处理黄金价格数据时出错: {str(e)}")
-        st.exception(e)
+        st.error(f"获取汇率数据时出错: {str(e)}")
+        st.info("使用默认汇率7.2")
+        return 7.2
+
+
+@st.cache_data(ttl=24*3600)  # 缓存24小时
+def get_historical_gold_data(days):
+    """获取历史黄金价格数据"""
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+
+        params = {
+            "api_key": METAL_PRICE_API_KEY,
+            "base": "USD",
+            "currencies": "XAU,CNY",
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d")
+        }
+
+        response = requests.get(
+            f"{METAL_PRICE_API_BASE_URL}/timeframe", params=params)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data["success"]:
+                # 处理历史数据
+                historical_data = []
+                for date, rates in data["rates"].items():
+                    gold_price_usd = 1 / float(rates["USDXAU"])
+                    usd_cny_rate = float(rates["CNY"])
+                    gold_price_cny = gold_price_usd * usd_cny_rate
+
+                    historical_data.append({
+                        "date": date,
+                        "international_price_usd": gold_price_usd,
+                        "international_price_cny": gold_price_cny,
+                        "china_price_cny": gold_price_cny * 1.03,  # 假设3%溢价
+                        "usd_cny_rate": usd_cny_rate,
+                        "premium_rate": 1.03
+                    })
+
+                return pd.DataFrame(historical_data)
+            else:
+                st.error("获取历史数据失败")
+                return pd.DataFrame()
+        else:
+            st.error(f"API请求失败: {response.status_code}")
+            return pd.DataFrame()
+
+    except Exception as e:
+        st.error(f"获取历史数据时出错: {str(e)}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=24*3600)  # 缓存24小时
+def get_china_gold_price(international_price_usd, usd_cny_rate):
+    """获取中国黄金价格（模拟）"""
+    try:
+        # 模拟国内黄金溢价（通常在2-5%之间）
+        premium_rate = 1.03  # 3%的溢价
+        china_price_cny = float(international_price_usd) * \
+            float(usd_cny_rate) * premium_rate
+        return china_price_cny, premium_rate
+    except Exception as e:
+        st.error(f"计算国内金价时出错: {str(e)}")
+        return None, None
+
+
+@st.cache_data(ttl=24*3600)  # 缓存24小时
+def create_gold_price_chart(history_data):
+    """创建黄金价格走势图"""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=history_data['date'],
+        y=history_data['china_price_cny']/31.1035,  # 转换为克
+        name='国内金价(人民币/克)',
+        line=dict(color='gold')
+    ))
+    fig.add_trace(go.Scatter(
+        x=history_data['date'],
+        y=history_data['international_price_cny']/31.1035,  # 转换为克
+        name='国际金价(人民币/克)',
+        line=dict(color='blue')
+    ))
+
+    fig.update_layout(
+        title='黄金价格走势',
+        xaxis_title='日期',
+        yaxis_title='价格(人民币/克)',
+        hovermode='x unified'
+    )
+    return fig
+
+
+def show_gold_analysis():
+    """显示黄金价格分析"""
+    st.title("黄金价格分析")
+
+    # 获取数据
+    international_price_usd, gold_data = get_gold_data()
+    usd_cny_rate = get_usd_cny_rate()
+
+    if international_price_usd is None:
+        st.error("无法获取黄金价格数据，请稍后再试。")
+        st.info("建议：\n1. 检查网络连接\n2. 等待几分钟后刷新页面\n3. 如果问题持续存在，请联系技术支持")
+        return
+
+    # 计算人民币价格
+    international_price_cny = international_price_usd * usd_cny_rate
+    china_price_cny, premium_rate = get_china_gold_price(
+        international_price_usd, usd_cny_rate)
+
+    # 保存数据到数据库
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    save_gold_price(
+        date=current_date,
+        international_price_usd=international_price_usd,
+        international_price_cny=international_price_cny,
+        china_price_cny=china_price_cny,
+        usd_cny_rate=usd_cny_rate,
+        premium_rate=premium_rate
+    )
+
+    # 显示当前价格
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("国际金价(美元/盎司)", f"${international_price_usd:.2f}")
+        st.metric("国际金价(人民币/盎司)", f"¥{international_price_cny:.2f}")
+    with col2:
+        st.metric("国内金价(人民币/克)", f"¥{china_price_cny/31.1035:.2f}")
+        st.metric("美元兑人民币汇率", f"{usd_cny_rate:.4f}")
+
+    # 显示历史数据
+    st.subheader("历史数据")
+    history_days = st.slider("显示最近多少天的数据", 7, 365, 30)
+    history_data = get_historical_gold_data(history_days)
+
+    if not history_data.empty:
+        # 使用缓存的图表
+        fig = create_gold_price_chart(history_data)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 显示数据表格
+        st.dataframe(history_data[['date', 'international_price_usd', 'international_price_cny',
+                                  'china_price_cny', 'usd_cny_rate', 'premium_rate']])
+    else:
+        st.info("暂无历史数据")
+
+    # 显示数据统计
+    st.subheader("数据统计")
+    if not history_data.empty:
+        stats = history_data.describe()
+        st.dataframe(stats)
+    else:
+        st.info("暂无统计数据")
