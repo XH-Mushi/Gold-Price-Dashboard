@@ -190,9 +190,10 @@ def get_historical_gold_data(days):
                     f"黄金数据日期范围: {gold_data.index.min().strftime('%Y-%m-%d')} 到 {gold_data.index.max().strftime('%Y-%m-%d')}")
                 st.info(f"黄金数据列: {gold_data.columns.tolist()}")
                 # 检查Close列的数据类型
-                st.info(f"黄金收盘价数据类型: {gold_data['Close'].dtype}")
+                if 'Close' in gold_data.columns:
+                    st.info(f"黄金收盘价数据类型: {gold_data['Close'].dtype}")
                 # 显示部分样本数据
-                st.info(f"黄金数据样本: {gold_data.head(2).to_dict()}")
+                st.info(f"黄金数据样本: \n{gold_data.head(2)}")
 
             if gold_data.empty:
                 st.warning("无法获取黄金期货数据，尝试获取黄金现货数据...")
@@ -210,6 +211,8 @@ def get_historical_gold_data(days):
                         f"黄金现货数据日期范围: {gold_data.index.min().strftime('%Y-%m-%d')} 到 {gold_data.index.max().strftime('%Y-%m-%d')}")
         except Exception as e:
             st.error(f"获取黄金价格数据失败: {str(e)}")
+            import traceback
+            st.error(f"获取黄金数据错误详情: {traceback.format_exc()}")
             return pd.DataFrame()
 
         # 获取汇率历史数据
@@ -228,9 +231,12 @@ def get_historical_gold_data(days):
                     f"汇率数据日期范围: {usd_cny_data.index.min().strftime('%Y-%m-%d')} 到 {usd_cny_data.index.max().strftime('%Y-%m-%d')}")
                 st.info(f"汇率数据列: {usd_cny_data.columns.tolist()}")
                 # 检查Close列的数据类型
-                st.info(f"汇率收盘价数据类型: {usd_cny_data['Close'].dtype}")
+                if 'Close' in usd_cny_data.columns:
+                    st.info(f"汇率收盘价数据类型: {usd_cny_data['Close'].dtype}")
         except Exception as e:
             st.error(f"获取汇率数据失败: {str(e)}")
+            import traceback
+            st.error(f"获取汇率数据错误详情: {traceback.format_exc()}")
             return pd.DataFrame()
 
         if gold_data.empty or usd_cny_data.empty:
@@ -248,14 +254,18 @@ def get_historical_gold_data(days):
                     try:
                         # 详细记录每一步操作和数据类型
                         gold_price = gold_data.loc[date, 'Close']
-                        st.info(
-                            f"日期 {date.strftime('%Y-%m-%d')} 的黄金价格原始值: {gold_price}, 类型: {type(gold_price)}")
+                        # 只打印一次详细信息，避免刷屏
+                        if len(historical_data) < 2:
+                            st.info(
+                                f"日期 {date.strftime('%Y-%m-%d')} 的黄金价格原始值: {gold_price}, 类型: {type(gold_price)}")
 
                         gold_price_usd = float(gold_price)
 
                         usd_cny_rate_raw = usd_cny_data.loc[date, 'Close']
-                        st.info(
-                            f"日期 {date.strftime('%Y-%m-%d')} 的汇率原始值: {usd_cny_rate_raw}, 类型: {type(usd_cny_rate_raw)}")
+                        # 只打印一次详细信息，避免刷屏
+                        if len(historical_data) < 2:
+                            st.info(
+                                f"日期 {date.strftime('%Y-%m-%d')} 的汇率原始值: {usd_cny_rate_raw}, 类型: {type(usd_cny_rate_raw)}")
 
                         usd_cny_rate = float(usd_cny_rate_raw)
                         gold_price_cny = gold_price_usd * usd_cny_rate
