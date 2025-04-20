@@ -183,6 +183,17 @@ def get_historical_gold_data(days):
                 progress=False
             )
 
+            # 调试信息
+            st.info(f"获取到黄金数据: {len(gold_data)}条记录")
+            if not gold_data.empty:
+                st.info(
+                    f"黄金数据日期范围: {gold_data.index.min().strftime('%Y-%m-%d')} 到 {gold_data.index.max().strftime('%Y-%m-%d')}")
+                st.info(f"黄金数据列: {gold_data.columns.tolist()}")
+                # 检查Close列的数据类型
+                st.info(f"黄金收盘价数据类型: {gold_data['Close'].dtype}")
+                # 显示部分样本数据
+                st.info(f"黄金数据样本: {gold_data.head(2).to_dict()}")
+
             if gold_data.empty:
                 st.warning("无法获取黄金期货数据，尝试获取黄金现货数据...")
                 gold_data = yf.download(
@@ -191,6 +202,12 @@ def get_historical_gold_data(days):
                     end=end_date.strftime('%Y-%m-%d'),
                     progress=False
                 )
+
+                # 调试信息
+                st.info(f"获取到黄金现货数据: {len(gold_data)}条记录")
+                if not gold_data.empty:
+                    st.info(
+                        f"黄金现货数据日期范围: {gold_data.index.min().strftime('%Y-%m-%d')} 到 {gold_data.index.max().strftime('%Y-%m-%d')}")
         except Exception as e:
             st.error(f"获取黄金价格数据失败: {str(e)}")
             return pd.DataFrame()
@@ -203,6 +220,15 @@ def get_historical_gold_data(days):
                 end=end_date.strftime('%Y-%m-%d'),
                 progress=False
             )
+
+            # 调试信息
+            st.info(f"获取到汇率数据: {len(usd_cny_data)}条记录")
+            if not usd_cny_data.empty:
+                st.info(
+                    f"汇率数据日期范围: {usd_cny_data.index.min().strftime('%Y-%m-%d')} 到 {usd_cny_data.index.max().strftime('%Y-%m-%d')}")
+                st.info(f"汇率数据列: {usd_cny_data.columns.tolist()}")
+                # 检查Close列的数据类型
+                st.info(f"汇率收盘价数据类型: {usd_cny_data['Close'].dtype}")
         except Exception as e:
             st.error(f"获取汇率数据失败: {str(e)}")
             return pd.DataFrame()
@@ -211,50 +237,62 @@ def get_historical_gold_data(days):
             st.error("无法获取完整的历史数据")
             return pd.DataFrame()
 
-        # 检查并过滤掉未来日期
-        today = current_date.date()
-        future_dates_gold = [
-            date for date in gold_data.index if date.date() > today]
-        future_dates_cny = [
-            date for date in usd_cny_data.index if date.date() > today]
-
-        if future_dates_gold:
-            st.warning(
-                f"发现并移除黄金数据中的未来日期: {[d.strftime('%Y-%m-%d') for d in future_dates_gold]}")
-            gold_data = gold_data.loc[gold_data.index.date <= today]
-
-        if future_dates_cny:
-            st.warning(
-                f"发现并移除汇率数据中的未来日期: {[d.strftime('%Y-%m-%d') for d in future_dates_cny]}")
-            usd_cny_data = usd_cny_data.loc[usd_cny_data.index.date <= today]
-
         # 准备数据
         historical_data = []
+        problem_dates = []
 
         for date in gold_data.index:
-            if date.date() > today:
-                continue  # 跳过未来日期
+            try:
+                # 检查该日期是否在汇率数据中
+                if date in usd_cny_data.index:
+                    try:
+                        # 详细记录每一步操作和数据类型
+                        gold_price = gold_data.loc[date, 'Close']
+                        st.info(
+                            f"日期 {date.strftime('%Y-%m-%d')} 的黄金价格原始值: {gold_price}, 类型: {type(gold_price)}")
 
-            if date in usd_cny_data.index:
-                try:
-                    gold_price_usd = float(gold_data['Close'][date])
-                    usd_cny_rate = float(usd_cny_data['Close'][date])
-                    gold_price_cny = gold_price_usd * usd_cny_rate
+                        gold_price_usd = float(gold_price)
 
-                    historical_data.append({
-                        "date": date.strftime('%Y-%m-%d'),
-                        "international_price_usd": gold_price_usd,
-                        "international_price_cny": gold_price_cny,
-                        "china_price_cny": gold_price_cny * 1.03,  # 假设3%溢价
-                        "usd_cny_rate": usd_cny_rate,
-                        "premium_rate": 1.03
-                    })
-                except Exception as e:
-                    st.warning(
-                        f"处理 {date.strftime('%Y-%m-%d')} 的数据时出错: {str(e)}")
-                    continue
+                        usd_cny_rate_raw = usd_cny_data.loc[date, 'Close']
+                        st.info(
+                            f"日期 {date.strftime('%Y-%m-%d')} 的汇率原始值: {usd_cny_rate_raw}, 类型: {type(usd_cny_rate_raw)}")
+
+                        usd_cny_rate = float(usd_cny_rate_raw)
+                        gold_price_cny = gold_price_usd * usd_cny_rate
+
+                        historical_data.append({
+                            "date": date.strftime('%Y-%m-%d'),
+                            "international_price_usd": gold_price_usd,
+                            "international_price_cny": gold_price_cny,
+                            "china_price_cny": gold_price_cny * 1.03,  # 假设3%溢价
+                            "usd_cny_rate": usd_cny_rate,
+                            "premium_rate": 1.03
+                        })
+                    except Exception as e:
+                        error_msg = f"处理 {date.strftime('%Y-%m-%d')} 的数据时出错: {str(e)}"
+                        st.warning(error_msg)
+                        problem_dates.append(
+                            {"date": date.strftime('%Y-%m-%d'), "error": str(e)})
+                        continue
+                else:
+                    st.warning(f"日期 {date.strftime('%Y-%m-%d')} 在汇率数据中不存在")
+            except Exception as e:
+                st.error(f"处理日期 {date} 时发生意外错误: {str(e)}")
+                continue
+
+        # 显示所有问题日期的汇总
+        if problem_dates:
+            st.warning(f"共有 {len(problem_dates)} 个日期处理出错")
+            problem_df = pd.DataFrame(problem_dates)
+            st.dataframe(problem_df)
 
         df = pd.DataFrame(historical_data)
+
+        # 调试信息
+        st.info(f"处理后的历史数据: {len(df)}条记录")
+        if not df.empty:
+            st.info(f"历史数据日期范围: {df['date'].min()} 到 {df['date'].max()}")
+
         if df.empty:
             st.warning("在指定时间范围内没有找到有效数据")
             return pd.DataFrame()
@@ -266,6 +304,8 @@ def get_historical_gold_data(days):
     except Exception as e:
         st.error(f"获取历史数据时出错: {str(e)}")
         st.info("请确保选择的日期范围有效，且不超过今天的日期")
+        import traceback
+        st.error(f"详细错误信息: {traceback.format_exc()}")
         return pd.DataFrame()
 
 
