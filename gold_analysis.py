@@ -189,9 +189,13 @@ def get_historical_gold_data(days):
                 st.info(
                     f"黄金数据日期范围: {gold_data.index.min().strftime('%Y-%m-%d')} 到 {gold_data.index.max().strftime('%Y-%m-%d')}")
                 st.info(f"黄金数据列: {gold_data.columns.tolist()}")
-                # 检查Close列的数据类型
+                # 安全地检查和显示数据类型
                 if 'Close' in gold_data.columns:
-                    st.info(f"黄金收盘价数据类型: {gold_data['Close'].dtype}")
+                    try:
+                        # 使用dtypes字典而不是直接访问dtype属性
+                        st.info(f"黄金收盘价数据类型: {gold_data.dtypes['Close']}")
+                    except Exception as e:
+                        st.warning(f"无法获取黄金收盘价数据类型: {str(e)}")
                 # 显示部分样本数据
                 st.info(f"黄金数据样本: \n{gold_data.head(2)}")
 
@@ -230,9 +234,13 @@ def get_historical_gold_data(days):
                 st.info(
                     f"汇率数据日期范围: {usd_cny_data.index.min().strftime('%Y-%m-%d')} 到 {usd_cny_data.index.max().strftime('%Y-%m-%d')}")
                 st.info(f"汇率数据列: {usd_cny_data.columns.tolist()}")
-                # 检查Close列的数据类型
+                # 安全地检查和显示数据类型
                 if 'Close' in usd_cny_data.columns:
-                    st.info(f"汇率收盘价数据类型: {usd_cny_data['Close'].dtype}")
+                    try:
+                        # 使用dtypes字典而不是直接访问dtype属性
+                        st.info(f"汇率收盘价数据类型: {usd_cny_data.dtypes['Close']}")
+                    except Exception as e:
+                        st.warning(f"无法获取汇率收盘价数据类型: {str(e)}")
         except Exception as e:
             st.error(f"获取汇率数据失败: {str(e)}")
             import traceback
@@ -242,6 +250,23 @@ def get_historical_gold_data(days):
         if gold_data.empty or usd_cny_data.empty:
             st.error("无法获取完整的历史数据")
             return pd.DataFrame()
+
+        # 检查并过滤掉未来日期
+        today = current_date.date()
+        future_dates_gold = [
+            date for date in gold_data.index if date.date() > today]
+        future_dates_cny = [
+            date for date in usd_cny_data.index if date.date() > today]
+
+        if future_dates_gold:
+            st.warning(
+                f"发现并移除黄金数据中的未来日期: {[d.strftime('%Y-%m-%d') for d in future_dates_gold]}")
+            gold_data = gold_data.loc[gold_data.index.date <= today]
+
+        if future_dates_cny:
+            st.warning(
+                f"发现并移除汇率数据中的未来日期: {[d.strftime('%Y-%m-%d') for d in future_dates_cny]}")
+            usd_cny_data = usd_cny_data.loc[usd_cny_data.index.date <= today]
 
         # 准备数据
         historical_data = []
