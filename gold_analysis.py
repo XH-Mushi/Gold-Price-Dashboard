@@ -768,12 +768,8 @@ def clear_cache():
     perform_seasonal_analysis.clear()
     calculate_rsi.clear()
     calculate_correlation_matrix.clear()
-    draw_trend_analysis_chart.clear()
-    draw_volatility_chart.clear()
-    draw_seasonal_chart.clear()
-    draw_correlation_heatmap.clear()
-    draw_technical_indicators.clear()
-    draw_premium_rate_chart.clear()
+    # 移除没有使用@st.cache_data装饰器的函数的clear调用
+    st.cache_data.clear()
 
 
 def show_gold_analysis():
